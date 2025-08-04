@@ -394,9 +394,10 @@ def main():
                 availability_counts = availability_bins.value_counts().sort_index()
 
                 if not availability_counts.empty:
-                    # Perbaikan: Mengubah Series menjadi DataFrame
+                    # Perbaikan yang lebih solid: Ubah indeks interval menjadi string
                     availability_df = availability_counts.to_frame().reset_index()
                     availability_df.columns = ['Availability Bins', 'Count']
+                    availability_df['Availability Bins'] = availability_df['Availability Bins'].astype(str)
                     st.bar_chart(availability_df.set_index('Availability Bins'))
                 else:
                     st.info("Tidak ada data ketersediaan yang valid untuk ditampilkan.")
