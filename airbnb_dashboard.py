@@ -392,9 +392,12 @@ def main():
             if not filtered_df['availability_365'].isna().all():
                 availability_bins = pd.cut(filtered_df['availability_365'], bins=5)
                 availability_counts = availability_bins.value_counts().sort_index()
-                # Pengecekan data yang diperbaiki
+
                 if not availability_counts.empty:
-                    st.bar_chart(availability_counts)
+                    # Perbaikan: Mengubah Series menjadi DataFrame
+                    availability_df = availability_counts.to_frame().reset_index()
+                    availability_df.columns = ['Availability Bins', 'Count']
+                    st.bar_chart(availability_df.set_index('Availability Bins'))
                 else:
                     st.info("Tidak ada data ketersediaan yang valid untuk ditampilkan.")
             else:
