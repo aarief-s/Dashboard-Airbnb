@@ -32,13 +32,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Load data function
+# Load and clean data function
 @st.cache_data
 def load_data():
     try:
-        # Coba load file CSV yang sebenarnya
         df = pd.read_csv('airbnb_features.csv')
+        
+        # Data cleaning
+        df = clean_data(df)
         return df
+        
     except FileNotFoundError:
         # Jika file tidak ditemukan, buat sample data
         st.warning("File 'airbnb_features.csv' tidak ditemukan. Menggunakan sample data.")
@@ -71,107 +74,228 @@ def load_data():
         
         return pd.DataFrame(data)
 
+def clean_data(df):
+    """Clean and prepare data for analysis"""
+    try:
+        # Clean numeric columns
+        numeric_columns = ['price', 'minimum_nights', 'number_of_reviews', 
+                          'availability_365', 'estimated_annual_revenue', 'estimated_occupancy_rate']
+        
+        for col in numeric_columns:
+            if col in df.columns:
+                # Convert to string first, then clean
+                df[col] = df[col].astype(str)
+                
+                # Remove problematic characters
+                df[col] = df[col].str.replace('{', '', regex=False)
+                df[col] = df[col].str.replace('}', '', regex=False)
+                df[col] = df[col].str.replace('x', '', regex=False)
+                df[col] = df[col].str.replace('[^0-9.-]', '', regex=True)
+                
+                # Replace empty strings with NaN
+                df[col] = df[col].replace('', np.nan)
+                
+                # Convert to numeric, coerce errors to NaN
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # Fill NaN values with median for numeric columns
+                df[col] = df[col].fillna(df[col].median())
+        
+        # Clean string columns
+        string_columns = ['name', 'host_name', 'neighbourhood_group', 'neighbourhood', 
+                         'room_type', 'price_category', 'performance_tier', 'market_position']
+        
+        for col in string_columns:
+            if col in df.columns:
+                # Fill NaN values with 'Unknown'
+                df[col] = df[col].fillna('Unknown')
+                # Remove extra whitespace
+                df[col] = df[col].astype(str).str.strip()
+        
+        # Ensure estimated_occupancy_rate is between 0 and 1
+        if 'estimated_occupancy_rate' in df.columns:
+            # If values are greater than 1, assume they are percentages (divide by 100)
+            df.loc[df['estimated_occupancy_rate'] > 1, 'estimated_occupancy_rate'] = \
+                df.loc[df['estimated_occupancy_rate'] > 1, 'estimated_occupancy_rate'] / 100
+            
+            # Clip values to be between 0 and 1
+            df['estimated_occupancy_rate'] = df['estimated_occupancy_rate'].clip(0, 1)
+        
+        # Ensure price is positive
+        if 'price' in df.columns:
+            df['price'] = df['price'].abs()
+            df.loc[df['price'] == 0, 'price'] = df['price'].median()
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Error cleaning data: {str(e)}")
+        return df
+
+def safe_calculate_mean(series):
+    """Safely calculate mean, handling any remaining issues"""
+    try:
+        # Remove any non-numeric values
+        numeric_series = pd.to_numeric(series, errors='coerce')
+        return numeric_series.mean()
+    except:
+        return 0
+
+def safe_calculate_sum(series):
+    """Safely calculate sum, handling any remaining issues"""
+    try:
+        # Remove any non-numeric values
+        numeric_series = pd.to_numeric(series, errors='coerce')
+        return numeric_series.sum()
+    except:
+        return 0
+
 def create_summary_table(data, group_col, value_col, title):
     """Create summary table for groupby analysis"""
-    if value_col:
-        summary = data.groupby(group_col).agg({
-            value_col: ['count', 'mean', 'sum', 'min', 'max']
-        }).round(2)
-        summary.columns = ['Count', f'Avg {value_col}', f'Total {value_col}', f'Min {value_col}', f'Max {value_col}']
-    else:
-        summary = data[group_col].value_counts().to_frame()
-        summary.columns = ['Count']
-        summary['Percentage'] = (summary['Count'] / summary['Count'].sum() * 100).round(1)
-    
-    st.subheader(title)
-    st.dataframe(summary, use_container_width=True)
-    return summary
+    try:
+        if value_col and value_col in data.columns:
+            summary = data.groupby(group_col).agg({
+                value_col: ['count', safe_calculate_mean, safe_calculate_sum, 'min', 'max']
+            }).round(2)
+            summary.columns = ['Count', f'Avg {value_col}', f'Total {value_col}', f'Min {value_col}', f'Max {value_col}']
+        else:
+            summary = data[group_col].value_counts().to_frame()
+            summary.columns = ['Count']
+            summary['Percentage'] = (summary['Count'] / summary['Count'].sum() * 100).round(1)
+        
+        st.subheader(title)
+        st.dataframe(summary, use_container_width=True)
+        return summary
+    except Exception as e:
+        st.error(f"Error creating summary table: {str(e)}")
+        return pd.DataFrame()
 
 def display_chart_using_streamlit(data, x_col, y_col=None, chart_type='bar'):
     """Create charts using Streamlit's built-in chart functions"""
-    if chart_type == 'bar' and y_col:
-        # Group data for bar chart
-        grouped_data = data.groupby(x_col)[y_col].mean().reset_index()
-        st.bar_chart(grouped_data.set_index(x_col)[y_col])
-    elif chart_type == 'bar':
-        # Count data for bar chart
-        count_data = data[x_col].value_counts()
-        st.bar_chart(count_data)
-    elif chart_type == 'line' and y_col:
-        # Line chart
-        grouped_data = data.groupby(x_col)[y_col].mean().reset_index()
-        st.line_chart(grouped_data.set_index(x_col)[y_col])
-    elif chart_type == 'scatter' and y_col:
-        # For scatter plot, we'll show a sample of data points
-        sample_data = data.sample(min(100, len(data)))[[x_col, y_col]]
-        st.scatter_chart(sample_data.set_index(x_col)[y_col])
+    try:
+        if chart_type == 'bar' and y_col and y_col in data.columns:
+            # Group data for bar chart
+            grouped_data = data.groupby(x_col)[y_col].apply(safe_calculate_mean).reset_index()
+            if not grouped_data.empty:
+                st.bar_chart(grouped_data.set_index(x_col)[y_col])
+        elif chart_type == 'bar':
+            # Count data for bar chart
+            count_data = data[x_col].value_counts()
+            if not count_data.empty:
+                st.bar_chart(count_data)
+        elif chart_type == 'line' and y_col and y_col in data.columns:
+            # Line chart
+            grouped_data = data.groupby(x_col)[y_col].apply(safe_calculate_mean).reset_index()
+            if not grouped_data.empty:
+                st.line_chart(grouped_data.set_index(x_col)[y_col])
+        elif chart_type == 'scatter' and y_col and y_col in data.columns:
+            # For scatter plot, we'll show a sample of data points
+            sample_data = data.sample(min(100, len(data)))[[x_col, y_col]]
+            # Remove any non-numeric values
+            sample_data = sample_data.dropna()
+            if not sample_data.empty:
+                st.scatter_chart(sample_data.set_index(x_col)[y_col])
+    except Exception as e:
+        st.error(f"Error creating chart: {str(e)}")
 
 def show_statistical_summary(data, columns):
     """Display statistical summary for numeric columns"""
     st.subheader("Statistical Summary")
     
-    numeric_data = data[columns].select_dtypes(include=[np.number])
-    if not numeric_data.empty:
-        summary_stats = numeric_data.describe().round(2)
-        st.dataframe(summary_stats, use_container_width=True)
-    else:
-        st.info("No numeric columns available for statistical summary")
+    try:
+        # Clean the data first
+        clean_data_for_stats = pd.DataFrame()
+        for col in columns:
+            if col in data.columns:
+                clean_series = pd.to_numeric(data[col], errors='coerce')
+                clean_data_for_stats[col] = clean_series
+        
+        if not clean_data_for_stats.empty:
+            summary_stats = clean_data_for_stats.describe().round(2)
+            st.dataframe(summary_stats, use_container_width=True)
+        else:
+            st.info("No valid numeric columns available for statistical summary")
+    except Exception as e:
+        st.error(f"Error creating statistical summary: {str(e)}")
 
 def main():
     # Header
     st.markdown('<h1 class="main-header">Airbnb Analytics Dashboard</h1>', unsafe_allow_html=True)
     
     # Load data
-    df = load_data()
+    try:
+        df = load_data()
+        
+        if df.empty:
+            st.error("No data available to display")
+            return
+        
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return
+    
+    # Show data info
+    st.sidebar.info(f"Dataset loaded: {len(df)} rows, {len(df.columns)} columns")
     
     # Sidebar filters
     st.sidebar.header("Filters")
     
     # Neighbourhood filter
     if 'neighbourhood_group' in df.columns:
+        unique_neighbourhoods = df['neighbourhood_group'].dropna().unique()
         selected_neighbourhoods = st.sidebar.multiselect(
             "Select Neighbourhood Groups",
-            options=df['neighbourhood_group'].unique(),
-            default=df['neighbourhood_group'].unique()
+            options=unique_neighbourhoods,
+            default=unique_neighbourhoods
         )
     else:
         selected_neighbourhoods = None
     
     # Room type filter
     if 'room_type' in df.columns:
+        unique_room_types = df['room_type'].dropna().unique()
         selected_room_types = st.sidebar.multiselect(
             "Select Room Types",
-            options=df['room_type'].unique(),
-            default=df['room_type'].unique()
+            options=unique_room_types,
+            default=unique_room_types
         )
     else:
         selected_room_types = None
     
     # Price range filter
     if 'price' in df.columns:
-        price_range = st.sidebar.slider(
-            "Price Range ($)",
-            min_value=int(df['price'].min()),
-            max_value=int(df['price'].max()),
-            value=(int(df['price'].min()), int(df['price'].max()))
-        )
+        price_min = float(df['price'].min())
+        price_max = float(df['price'].max())
+        if price_min != price_max:
+            price_range = st.sidebar.slider(
+                "Price Range ($)",
+                min_value=price_min,
+                max_value=price_max,
+                value=(price_min, price_max)
+            )
+        else:
+            price_range = (price_min, price_max)
     else:
         price_range = None
     
     # Filter data
     filtered_df = df.copy()
     
-    if selected_neighbourhoods and 'neighbourhood_group' in df.columns:
-        filtered_df = filtered_df[filtered_df['neighbourhood_group'].isin(selected_neighbourhoods)]
-    
-    if selected_room_types and 'room_type' in df.columns:
-        filtered_df = filtered_df[filtered_df['room_type'].isin(selected_room_types)]
-    
-    if price_range and 'price' in df.columns:
-        filtered_df = filtered_df[
-            (filtered_df['price'] >= price_range[0]) &
-            (filtered_df['price'] <= price_range[1])
-        ]
+    try:
+        if selected_neighbourhoods and 'neighbourhood_group' in df.columns:
+            filtered_df = filtered_df[filtered_df['neighbourhood_group'].isin(selected_neighbourhoods)]
+        
+        if selected_room_types and 'room_type' in df.columns:
+            filtered_df = filtered_df[filtered_df['room_type'].isin(selected_room_types)]
+        
+        if price_range and 'price' in df.columns:
+            filtered_df = filtered_df[
+                (filtered_df['price'] >= price_range[0]) &
+                (filtered_df['price'] <= price_range[1])
+            ]
+    except Exception as e:
+        st.error(f"Error filtering data: {str(e)}")
+        filtered_df = df.copy()
     
     # Key Metrics
     st.header("Key Metrics")
@@ -186,18 +310,19 @@ def main():
     
     with col2:
         if 'price' in filtered_df.columns:
-            avg_price = filtered_df['price'].mean()
+            avg_price = safe_calculate_mean(filtered_df['price'])
+            overall_avg = safe_calculate_mean(df['price'])
             st.metric(
                 label="Average Price",
                 value=f"${avg_price:.0f}",
-                delta=f"${avg_price - df['price'].mean():.0f} vs overall"
+                delta=f"${avg_price - overall_avg:.0f} vs overall"
             )
         else:
             st.metric(label="Average Price", value="N/A")
     
     with col3:
         if 'estimated_annual_revenue' in filtered_df.columns:
-            total_revenue = filtered_df['estimated_annual_revenue'].sum()
+            total_revenue = safe_calculate_sum(filtered_df['estimated_annual_revenue'])
             st.metric(
                 label="Total Est. Revenue",
                 value=f"${total_revenue:,.0f}",
@@ -207,7 +332,7 @@ def main():
     
     with col4:
         if 'estimated_occupancy_rate' in filtered_df.columns:
-            avg_occupancy = filtered_df['estimated_occupancy_rate'].mean()
+            avg_occupancy = safe_calculate_mean(filtered_df['estimated_occupancy_rate'])
             st.metric(
                 label="Avg Occupancy Rate",
                 value=f"{avg_occupancy:.1%}",
@@ -217,7 +342,7 @@ def main():
     
     with col5:
         if 'number_of_reviews' in filtered_df.columns:
-            avg_reviews = filtered_df['number_of_reviews'].mean()
+            avg_reviews = safe_calculate_mean(filtered_df['number_of_reviews'])
             st.metric(
                 label="Avg Reviews",
                 value=f"{avg_reviews:.0f}",
@@ -263,21 +388,6 @@ def main():
         else:
             st.info("Market position data not available")
     
-    # Additional Analysis with Streamlit charts
-    st.header("Additional Analysis")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if 'price' in filtered_df.columns and 'estimated_occupancy_rate' in filtered_df.columns:
-            st.subheader("Price vs Occupancy Rate")
-            display_chart_using_streamlit(filtered_df, 'price', 'estimated_occupancy_rate', 'scatter')
-    
-    with col2:
-        if 'availability_365' in filtered_df.columns:
-            st.subheader("Availability Distribution")
-            display_chart_using_streamlit(filtered_df, 'availability_365', None, 'bar')
-    
     # Statistical Summary
     numeric_cols = []
     potential_cols = ['price', 'minimum_nights', 'number_of_reviews', 
@@ -290,42 +400,27 @@ def main():
     if numeric_cols:
         show_statistical_summary(filtered_df, numeric_cols)
     
-    # Detailed Analysis Tables
-    st.header("Detailed Analysis")
-    
     # Top performers table
-    st.subheader("Top Performing Properties")
+    st.header("Top Performing Properties")
     
     if 'estimated_annual_revenue' in filtered_df.columns:
-        display_cols = ['name'] if 'name' in filtered_df.columns else []
-        for col in ['neighbourhood_group', 'room_type', 'price', 
-                   'estimated_annual_revenue', 'estimated_occupancy_rate', 'number_of_reviews']:
-            if col in filtered_df.columns:
-                display_cols.append(col)
-        
-        if display_cols:
-            top_performers = filtered_df.nlargest(10, 'estimated_annual_revenue')[display_cols]
-            st.dataframe(top_performers, use_container_width=True)
+        try:
+            display_cols = []
+            for col in ['name', 'neighbourhood_group', 'room_type', 'price', 
+                       'estimated_annual_revenue', 'estimated_occupancy_rate', 'number_of_reviews']:
+                if col in filtered_df.columns:
+                    display_cols.append(col)
+            
+            if display_cols:
+                # Clean the revenue column for sorting
+                revenue_clean = pd.to_numeric(filtered_df['estimated_annual_revenue'], errors='coerce')
+                top_indices = revenue_clean.nlargest(10).index
+                top_performers = filtered_df.loc[top_indices, display_cols]
+                st.dataframe(top_performers, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error creating top performers table: {str(e)}")
     else:
         st.info("Revenue data not available for ranking")
-    
-    # Category Analysis
-    st.subheader("Category Analysis")
-    
-    analysis_tabs = st.tabs(["Room Type Analysis", "Price Category Analysis", "Performance Tier Analysis"])
-    
-    with analysis_tabs[0]:
-        if 'room_type' in filtered_df.columns:
-            create_summary_table(filtered_df, 'room_type', 'price', 'Room Type Summary')
-    
-    with analysis_tabs[1]:
-        if 'price_category' in filtered_df.columns:
-            create_summary_table(filtered_df, 'price_category', 'estimated_annual_revenue', 
-                                'Price Category Summary')
-    
-    with analysis_tabs[2]:
-        if 'performance_tier' in filtered_df.columns:
-            create_summary_table(filtered_df, 'performance_tier', None, 'Performance Tier Distribution')
     
     # Data Preview
     st.header("Data Preview")
@@ -337,47 +432,31 @@ def main():
     with col2:
         st.metric("Total Columns", len(filtered_df.columns))
     with col3:
-        st.metric("Memory Usage", f"{filtered_df.memory_usage(deep=True).sum() / 1024:.1f} KB")
-    
-    # Show column info
-    st.subheader("Column Information")
-    col_info = pd.DataFrame({
-        'Column': filtered_df.columns,
-        'Data Type': filtered_df.dtypes,
-        'Non-Null Count': filtered_df.count(),
-        'Null Count': filtered_df.isnull().sum(),
-        'Null Percentage': (filtered_df.isnull().sum() / len(filtered_df) * 100).round(2)
-    })
-    st.dataframe(col_info, use_container_width=True)
+        memory_usage = filtered_df.memory_usage(deep=True).sum() / 1024
+        st.metric("Memory Usage", f"{memory_usage:.1f} KB")
     
     # Show sample data
     st.subheader("Sample Data")
-    st.dataframe(filtered_df.head(20), use_container_width=True)
+    st.dataframe(filtered_df.head(10), use_container_width=True)
     
     # Data Export
     st.header("Data Export")
     col1, col2 = st.columns(2)
     
     with col1:
-        csv = filtered_df.to_csv(index=False)
-        st.download_button(
-            label="Download Filtered Data as CSV",
-            data=csv,
-            file_name=f"airbnb_filtered_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
+        try:
+            csv = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="Download Filtered Data as CSV",
+                data=csv,
+                file_name=f"airbnb_filtered_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        except Exception as e:
+            st.error(f"Error preparing download: {str(e)}")
     
     with col2:
         st.info(f"Showing {len(filtered_df)} properties out of {len(df)} total properties")
-        
-        # Additional export options
-        if st.button("Show Data Summary"):
-            st.json({
-                "total_properties": len(filtered_df),
-                "avg_price": float(filtered_df['price'].mean()) if 'price' in filtered_df.columns else None,
-                "total_revenue": float(filtered_df['estimated_annual_revenue'].sum()) if 'estimated_annual_revenue' in filtered_df.columns else None,
-                "avg_occupancy": float(filtered_df['estimated_occupancy_rate'].mean()) if 'estimated_occupancy_rate' in filtered_df.columns else None
-            })
 
 if __name__ == "__main__":
     main()
