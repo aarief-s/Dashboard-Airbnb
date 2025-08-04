@@ -310,7 +310,7 @@ def main():
             total_revenue = safe_calculate_sum(filtered_df['estimated_annual_revenue'])
             st.metric(
                 label="Total Est. Revenue",
-                value=f"${total_revenue:,.0f}",
+                value=f"${total_revenue:,.0f}"
             )
         else:
             st.metric(label="Total Est. Revenue", value="N/A")
@@ -320,7 +320,7 @@ def main():
             avg_occupancy = safe_calculate_mean(filtered_df['estimated_occupancy_rate'])
             st.metric(
                 label="Avg Occupancy Rate",
-                value=f"{avg_occupancy:.1%}",
+                value=f"{avg_occupancy:.1%}"
             )
         else:
             st.metric(label="Avg Occupancy Rate", value="N/A")
@@ -330,7 +330,7 @@ def main():
             avg_reviews = safe_calculate_mean(filtered_df['number_of_reviews'])
             st.metric(
                 label="Avg Reviews",
-                value=f"{avg_reviews:.0f}",
+                value=f"{avg_reviews:.0f}"
             )
         else:
             st.metric(label="Avg Reviews", value="N/A")
@@ -382,6 +382,8 @@ def main():
         if 'price' in filtered_df.columns and 'estimated_occupancy_rate' in filtered_df.columns:
             st.subheader("Price vs Occupancy Rate")
             display_chart_using_streamlit(filtered_df, 'price', 'estimated_occupancy_rate', 'scatter')
+        else:
+            st.info("Price vs occupancy data not available")
     
     with col2:
         if 'availability_365' in filtered_df.columns:
@@ -391,6 +393,10 @@ def main():
                 availability_bins = pd.cut(filtered_df['availability_365'], bins=5)
                 availability_counts = availability_bins.value_counts().sort_index()
                 st.bar_chart(availability_counts)
+            else:
+                st.info("No availability data to display")
+        else:
+            st.info("Availability data not available")
     
     # Statistical Summary
     numeric_cols = []
@@ -465,4 +471,13 @@ def main():
                 label="Download Filtered Data as CSV",
                 data=csv,
                 file_name=f"airbnb_filtered_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="
+                mime="text/csv"
+            )
+        except Exception as e:
+            st.error(f"Error preparing download: {str(e)}")
+    
+    with col2:
+        st.info(f"Showing {len(filtered_df)} properties out of {len(df)} total properties")
+
+if __name__ == "__main__":
+    main()
