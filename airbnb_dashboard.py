@@ -36,6 +36,7 @@ st.markdown("""
 @st.cache_data
 def load_data():
     try:
+        # Load file CSV
         df = pd.read_csv('airbnb_features.csv')
         
         # Data cleaning
@@ -43,36 +44,11 @@ def load_data():
         return df
         
     except FileNotFoundError:
-        # Jika file tidak ditemukan, buat sample data
-        st.warning("File 'airbnb_features.csv' tidak ditemukan. Menggunakan sample data.")
-        
-        np.random.seed(42)
-        neighbourhoods = ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island']
-        room_types = ['Entire home/apt', 'Private room', 'Shared room']
-        price_categories = ['Budget', 'Mid-range', 'Luxury']
-        performance_tiers = ['Low', 'Medium', 'High']
-        
-        n_samples = 500
-        data = {
-            'id': range(1, n_samples + 1),
-            'name': [f'Property {i}' for i in range(1, n_samples + 1)],
-            'host_id': np.random.randint(1000, 9999, n_samples),
-            'host_name': [f'Host {i}' for i in range(1, n_samples + 1)],
-            'neighbourhood_group': np.random.choice(neighbourhoods, n_samples),
-            'neighbourhood': [f'Area {i}' for i in range(1, n_samples + 1)],
-            'room_type': np.random.choice(room_types, n_samples),
-            'price': np.random.randint(50, 500, n_samples),
-            'minimum_nights': np.random.randint(1, 30, n_samples),
-            'number_of_reviews': np.random.randint(0, 300, n_samples),
-            'availability_365': np.random.randint(0, 365, n_samples),
-            'price_category': np.random.choice(price_categories, n_samples),
-            'estimated_annual_revenue': np.random.randint(10000, 100000, n_samples),
-            'estimated_occupancy_rate': np.round(np.random.uniform(0.3, 0.9, n_samples), 2),
-            'performance_tier': np.random.choice(performance_tiers, n_samples),
-            'market_position': np.random.choice(['Niche', 'Mainstream', 'Premium'], n_samples)
-        }
-        
-        return pd.DataFrame(data)
+        st.error("File 'airbnb_features.csv' tidak ditemukan. Pastikan file berada di direktori yang sama dengan script ini.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error saat membaca file CSV: {str(e)}")
+        st.stop()
 
 def clean_data(df):
     """Clean and prepare data for analysis"""
@@ -99,7 +75,15 @@ def clean_data(df):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
                 
                 # Fill NaN values with median for numeric columns
-                df[col] = df[col].fillna(df[col].median())
+                if col in ['price', 'estimated_annual_revenue']:
+                    # For price and revenue, use median
+                    df[col] = df[col].fillna(df[col].median())
+                elif col == 'estimated_occupancy_rate':
+                    # For occupancy rate, use mean
+                    df[col] = df[col].fillna(df[col].mean())
+                else:
+                    # For others, use 0
+                    df[col] = df[col].fillna(0)
         
         # Clean string columns
         string_columns = ['name', 'host_name', 'neighbourhood_group', 'neighbourhood', 
@@ -223,19 +207,14 @@ def main():
     st.markdown('<h1 class="main-header">Airbnb Analytics Dashboard</h1>', unsafe_allow_html=True)
     
     # Load data
-    try:
-        df = load_data()
-        
-        if df.empty:
-            st.error("No data available to display")
-            return
-        
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
+    df = load_data()
+    
+    if df.empty:
+        st.error("Dataset kosong atau tidak dapat dibaca")
         return
     
     # Show data info
-    st.sidebar.info(f"Dataset loaded: {len(df)} rows, {len(df.columns)} columns")
+    st.sidebar.success(f"Dataset berhasil dimuat: {len(df)} baris, {len(df.columns)} kolom")
     
     # Sidebar filters
     st.sidebar.header("Filters")
@@ -243,22 +222,28 @@ def main():
     # Neighbourhood filter
     if 'neighbourhood_group' in df.columns:
         unique_neighbourhoods = df['neighbourhood_group'].dropna().unique()
-        selected_neighbourhoods = st.sidebar.multiselect(
-            "Select Neighbourhood Groups",
-            options=unique_neighbourhoods,
-            default=unique_neighbourhoods
-        )
+        if len(unique_neighbourhoods) > 0:
+            selected_neighbourhoods = st.sidebar.multiselect(
+                "Select Neighbourhood Groups",
+                options=unique_neighbourhoods,
+                default=unique_neighbourhoods
+            )
+        else:
+            selected_neighbourhoods = None
     else:
         selected_neighbourhoods = None
     
     # Room type filter
     if 'room_type' in df.columns:
         unique_room_types = df['room_type'].dropna().unique()
-        selected_room_types = st.sidebar.multiselect(
-            "Select Room Types",
-            options=unique_room_types,
-            default=unique_room_types
-        )
+        if len(unique_room_types) > 0:
+            selected_room_types = st.sidebar.multiselect(
+                "Select Room Types",
+                options=unique_room_types,
+                default=unique_room_types
+            )
+        else:
+            selected_room_types = None
     else:
         selected_room_types = None
     
@@ -266,7 +251,7 @@ def main():
     if 'price' in df.columns:
         price_min = float(df['price'].min())
         price_max = float(df['price'].max())
-        if price_min != price_max:
+        if price_min != price_max and not (np.isnan(price_min) or np.isnan(price_max)):
             price_range = st.sidebar.slider(
                 "Price Range ($)",
                 min_value=price_min,
@@ -274,7 +259,7 @@ def main():
                 value=(price_min, price_max)
             )
         else:
-            price_range = (price_min, price_max)
+            price_range = None
     else:
         price_range = None
     
@@ -388,6 +373,25 @@ def main():
         else:
             st.info("Market position data not available")
     
+    # Additional Analysis
+    st.header("Additional Analysis")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if 'price' in filtered_df.columns and 'estimated_occupancy_rate' in filtered_df.columns:
+            st.subheader("Price vs Occupancy Rate")
+            display_chart_using_streamlit(filtered_df, 'price', 'estimated_occupancy_rate', 'scatter')
+    
+    with col2:
+        if 'availability_365' in filtered_df.columns:
+            st.subheader("Availability Distribution")
+            # Create bins for availability
+            if not filtered_df['availability_365'].isna().all():
+                availability_bins = pd.cut(filtered_df['availability_365'], bins=5)
+                availability_counts = availability_bins.value_counts().sort_index()
+                st.bar_chart(availability_counts)
+    
     # Statistical Summary
     numeric_cols = []
     potential_cols = ['price', 'minimum_nights', 'number_of_reviews', 
@@ -435,6 +439,17 @@ def main():
         memory_usage = filtered_df.memory_usage(deep=True).sum() / 1024
         st.metric("Memory Usage", f"{memory_usage:.1f} KB")
     
+    # Show column info
+    st.subheader("Column Information")
+    col_info = pd.DataFrame({
+        'Column': filtered_df.columns,
+        'Data Type': filtered_df.dtypes,
+        'Non-Null Count': filtered_df.count(),
+        'Null Count': filtered_df.isnull().sum(),
+        'Null Percentage': (filtered_df.isnull().sum() / len(filtered_df) * 100).round(2)
+    })
+    st.dataframe(col_info, use_container_width=True)
+    
     # Show sample data
     st.subheader("Sample Data")
     st.dataframe(filtered_df.head(10), use_container_width=True)
@@ -450,13 +465,4 @@ def main():
                 label="Download Filtered Data as CSV",
                 data=csv,
                 file_name=f"airbnb_filtered_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        except Exception as e:
-            st.error(f"Error preparing download: {str(e)}")
-    
-    with col2:
-        st.info(f"Showing {len(filtered_df)} properties out of {len(df)} total properties")
-
-if __name__ == "__main__":
-    main()
+                mime="
