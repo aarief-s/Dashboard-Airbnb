@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib as plt
-import seaborn as sns
 from datetime import datetime
 
 # Page configuration
@@ -26,6 +24,10 @@ st.markdown("""
         padding: 1rem;
         border-radius: 10px;
         border-left: 5px solid #FF5A5F;
+    }
+    .stDataFrame {
+        border: 1px solid #e6e6e6;
+        border-radius: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -69,76 +71,51 @@ def load_data():
         
         return pd.DataFrame(data)
 
-def create_bar_chart(data, x_col, y_col, title):
-    """Create a simple bar chart using matplotlib"""
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    if y_col:
-        # Grouped bar chart
-        grouped_data = data.groupby(x_col)[y_col].mean()
-        bars = ax.bar(grouped_data.index, grouped_data.values, color='#FF5A5F', alpha=0.7)
-        ax.set_ylabel(y_col.replace('_', ' ').title())
+def create_summary_table(data, group_col, value_col, title):
+    """Create summary table for groupby analysis"""
+    if value_col:
+        summary = data.groupby(group_col).agg({
+            value_col: ['count', 'mean', 'sum', 'min', 'max']
+        }).round(2)
+        summary.columns = ['Count', f'Avg {value_col}', f'Total {value_col}', f'Min {value_col}', f'Max {value_col}']
     else:
-        # Count bar chart
-        counts = data[x_col].value_counts()
-        bars = ax.bar(counts.index, counts.values, color='#FF5A5F', alpha=0.7)
-        ax.set_ylabel('Count')
+        summary = data[group_col].value_counts().to_frame()
+        summary.columns = ['Count']
+        summary['Percentage'] = (summary['Count'] / summary['Count'].sum() * 100).round(1)
     
-    ax.set_xlabel(x_col.replace('_', ' ').title())
-    ax.set_title(title)
-    ax.tick_params(axis='x', rotation=45)
-    
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height,
-                f'{height:.0f}', ha='center', va='bottom')
-    
-    plt.tight_layout()
-    return fig
+    st.subheader(title)
+    st.dataframe(summary, use_container_width=True)
+    return summary
 
-def create_pie_chart(data, column, title):
-    """Create a pie chart using matplotlib"""
-    fig, ax = plt.subplots(figsize=(8, 8))
-    
-    counts = data[column].value_counts()
-    colors = ['#FF5A5F', '#00A699', '#FC642D', '#484848', '#767676']
-    
-    wedges, texts, autotexts = ax.pie(counts.values, labels=counts.index, autopct='%1.1f%%',
-                                     colors=colors[:len(counts)], startangle=90)
-    
-    ax.set_title(title, fontsize=16, fontweight='bold')
-    return fig
+def display_chart_using_streamlit(data, x_col, y_col=None, chart_type='bar'):
+    """Create charts using Streamlit's built-in chart functions"""
+    if chart_type == 'bar' and y_col:
+        # Group data for bar chart
+        grouped_data = data.groupby(x_col)[y_col].mean().reset_index()
+        st.bar_chart(grouped_data.set_index(x_col)[y_col])
+    elif chart_type == 'bar':
+        # Count data for bar chart
+        count_data = data[x_col].value_counts()
+        st.bar_chart(count_data)
+    elif chart_type == 'line' and y_col:
+        # Line chart
+        grouped_data = data.groupby(x_col)[y_col].mean().reset_index()
+        st.line_chart(grouped_data.set_index(x_col)[y_col])
+    elif chart_type == 'scatter' and y_col:
+        # For scatter plot, we'll show a sample of data points
+        sample_data = data.sample(min(100, len(data)))[[x_col, y_col]]
+        st.scatter_chart(sample_data.set_index(x_col)[y_col])
 
-def create_scatter_plot(data, x_col, y_col, title):
-    """Create a scatter plot using matplotlib"""
-    fig, ax = plt.subplots(figsize=(10, 6))
+def show_statistical_summary(data, columns):
+    """Display statistical summary for numeric columns"""
+    st.subheader("Statistical Summary")
     
-    ax.scatter(data[x_col], data[y_col], alpha=0.6, color='#FF5A5F')
-    ax.set_xlabel(x_col.replace('_', ' ').title())
-    ax.set_ylabel(y_col.replace('_', ' ').title())
-    ax.set_title(title)
-    
-    # Add trend line
-    z = np.polyfit(data[x_col], data[y_col], 1)
-    p = np.poly1d(z)
-    ax.plot(data[x_col], p(data[x_col]), "r--", alpha=0.8)
-    
-    plt.tight_layout()
-    return fig
-
-def create_correlation_heatmap(data, numeric_cols):
-    """Create correlation heatmap using seaborn"""
-    fig, ax = plt.subplots(figsize=(10, 8))
-    
-    correlation_matrix = data[numeric_cols].corr()
-    
-    sns.heatmap(correlation_matrix, annot=True, cmap='RdBu', center=0,
-                square=True, ax=ax, cbar_kws={"shrink": .8})
-    
-    ax.set_title('Correlation Matrix of Key Metrics', fontsize=16, fontweight='bold')
-    plt.tight_layout()
-    return fig
+    numeric_data = data[columns].select_dtypes(include=[np.number])
+    if not numeric_data.empty:
+        summary_stats = numeric_data.describe().round(2)
+        st.dataframe(summary_stats, use_container_width=True)
+    else:
+        st.info("No numeric columns available for statistical summary")
 
 def main():
     # Header
@@ -248,69 +225,60 @@ def main():
         else:
             st.metric(label="Avg Reviews", value="N/A")
     
-    # Charts Row 1
+    # Market Analysis with built-in charts
     st.header("Market Analysis")
+    
     col1, col2 = st.columns(2)
     
     with col1:
         if 'neighbourhood_group' in filtered_df.columns and 'price' in filtered_df.columns:
-            fig = create_bar_chart(filtered_df, 'neighbourhood_group', 'price', 
-                                 'Average Price by Neighbourhood Group')
-            st.pyplot(fig)
+            st.subheader("Average Price by Neighbourhood Group")
+            display_chart_using_streamlit(filtered_df, 'neighbourhood_group', 'price', 'bar')
         else:
             st.info("Price by neighbourhood data not available")
     
     with col2:
         if 'room_type' in filtered_df.columns:
-            fig = create_pie_chart(filtered_df, 'room_type', 'Room Type Distribution')
-            st.pyplot(fig)
+            st.subheader("Room Type Distribution")
+            display_chart_using_streamlit(filtered_df, 'room_type', None, 'bar')
         else:
             st.info("Room type data not available")
     
-    # Charts Row 2
+    # Performance Analysis with tables
+    st.header("Performance Analysis")
+    
     col1, col2 = st.columns(2)
     
     with col1:
         if 'performance_tier' in filtered_df.columns and 'estimated_annual_revenue' in filtered_df.columns:
-            fig = create_bar_chart(filtered_df, 'performance_tier', 'estimated_annual_revenue',
-                                 'Average Revenue by Performance Tier')
-            st.pyplot(fig)
+            create_summary_table(filtered_df, 'performance_tier', 'estimated_annual_revenue',
+                                'Revenue by Performance Tier')
         else:
             st.info("Performance tier data not available")
     
     with col2:
-        if 'price' in filtered_df.columns and 'estimated_occupancy_rate' in filtered_df.columns:
-            fig = create_scatter_plot(filtered_df, 'price', 'estimated_occupancy_rate',
-                                    'Occupancy Rate vs Price')
-            st.pyplot(fig)
+        if 'market_position' in filtered_df.columns and 'price' in filtered_df.columns:
+            create_summary_table(filtered_df, 'market_position', 'price',
+                                'Price by Market Position')
         else:
-            st.info("Price vs occupancy data not available")
+            st.info("Market position data not available")
     
-    # Performance Analysis
-    st.header("Performance Analysis")
-    col1, col2, col3 = st.columns(3)
+    # Additional Analysis with Streamlit charts
+    st.header("Additional Analysis")
+    
+    col1, col2 = st.columns(2)
     
     with col1:
-        if 'performance_tier' in filtered_df.columns:
-            fig = create_bar_chart(filtered_df, 'performance_tier', None,
-                                 'Performance Tier Distribution')
-            st.pyplot(fig)
+        if 'price' in filtered_df.columns and 'estimated_occupancy_rate' in filtered_df.columns:
+            st.subheader("Price vs Occupancy Rate")
+            display_chart_using_streamlit(filtered_df, 'price', 'estimated_occupancy_rate', 'scatter')
     
     with col2:
-        if 'market_position' in filtered_df.columns:
-            fig = create_bar_chart(filtered_df, 'market_position', None,
-                                 'Market Position Distribution')
-            st.pyplot(fig)
+        if 'availability_365' in filtered_df.columns:
+            st.subheader("Availability Distribution")
+            display_chart_using_streamlit(filtered_df, 'availability_365', None, 'bar')
     
-    with col3:
-        if 'price_category' in filtered_df.columns:
-            fig = create_bar_chart(filtered_df, 'price_category', None,
-                                 'Price Category Distribution')
-            st.pyplot(fig)
-    
-    # Correlation Analysis
-    st.header("Detailed Analysis")
-    
+    # Statistical Summary
     numeric_cols = []
     potential_cols = ['price', 'minimum_nights', 'number_of_reviews', 
                      'availability_365', 'estimated_annual_revenue', 'estimated_occupancy_rate']
@@ -319,11 +287,11 @@ def main():
         if col in filtered_df.columns:
             numeric_cols.append(col)
     
-    if len(numeric_cols) > 1:
-        fig = create_correlation_heatmap(filtered_df, numeric_cols)
-        st.pyplot(fig)
-    else:
-        st.info("Not enough numeric columns for correlation analysis")
+    if numeric_cols:
+        show_statistical_summary(filtered_df, numeric_cols)
+    
+    # Detailed Analysis Tables
+    st.header("Detailed Analysis")
     
     # Top performers table
     st.subheader("Top Performing Properties")
@@ -341,7 +309,25 @@ def main():
     else:
         st.info("Revenue data not available for ranking")
     
-    # Raw Data Preview
+    # Category Analysis
+    st.subheader("Category Analysis")
+    
+    analysis_tabs = st.tabs(["Room Type Analysis", "Price Category Analysis", "Performance Tier Analysis"])
+    
+    with analysis_tabs[0]:
+        if 'room_type' in filtered_df.columns:
+            create_summary_table(filtered_df, 'room_type', 'price', 'Room Type Summary')
+    
+    with analysis_tabs[1]:
+        if 'price_category' in filtered_df.columns:
+            create_summary_table(filtered_df, 'price_category', 'estimated_annual_revenue', 
+                                'Price Category Summary')
+    
+    with analysis_tabs[2]:
+        if 'performance_tier' in filtered_df.columns:
+            create_summary_table(filtered_df, 'performance_tier', None, 'Performance Tier Distribution')
+    
+    # Data Preview
     st.header("Data Preview")
     st.subheader("Dataset Information")
     col1, col2, col3 = st.columns(3)
@@ -359,13 +345,14 @@ def main():
         'Column': filtered_df.columns,
         'Data Type': filtered_df.dtypes,
         'Non-Null Count': filtered_df.count(),
-        'Null Count': filtered_df.isnull().sum()
+        'Null Count': filtered_df.isnull().sum(),
+        'Null Percentage': (filtered_df.isnull().sum() / len(filtered_df) * 100).round(2)
     })
     st.dataframe(col_info, use_container_width=True)
     
     # Show sample data
     st.subheader("Sample Data")
-    st.dataframe(filtered_df.head(10), use_container_width=True)
+    st.dataframe(filtered_df.head(20), use_container_width=True)
     
     # Data Export
     st.header("Data Export")
@@ -382,7 +369,15 @@ def main():
     
     with col2:
         st.info(f"Showing {len(filtered_df)} properties out of {len(df)} total properties")
+        
+        # Additional export options
+        if st.button("Show Data Summary"):
+            st.json({
+                "total_properties": len(filtered_df),
+                "avg_price": float(filtered_df['price'].mean()) if 'price' in filtered_df.columns else None,
+                "total_revenue": float(filtered_df['estimated_annual_revenue'].sum()) if 'estimated_annual_revenue' in filtered_df.columns else None,
+                "avg_occupancy": float(filtered_df['estimated_occupancy_rate'].mean()) if 'estimated_occupancy_rate' in filtered_df.columns else None
+            })
 
 if __name__ == "__main__":
     main()
-
